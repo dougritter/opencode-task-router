@@ -70,14 +70,26 @@ An OpenCode plugin that adds a `/route` command and a `route_task` custom tool. 
 - On each `/route` call, the last 20 decisions are injected as few-shot examples.
 - Over time, the classifier naturally adapts to your preferences.
 
-### Routing Tiers
+### Routing Tiers (Dynamic Discovery)
 
-| Cost Tier | Model | Agent | Use Case |
-|-----------|-------|-------|----------|
-| free | `ollama/qwen3:8b` | `local-worker` | Trivial/simple tasks |
-| cheap | `anthropic/claude-haiku-4-20250514` | `build` | Moderate tasks |
-| moderate | `anthropic/claude-sonnet-4-20250514` | `build` | Complex features |
-| expensive | `anthropic/claude-opus-4-20250514` | `build` | Architecture-level work |
+The plugin **does not hardcode model IDs**. Instead, it dynamically discovers
+all available models from OpenCode's configured providers at startup (and on
+each `/route` call) via `client.config.providers()`.
+
+Each discovered model is classified into a cost tier using regex heuristics:
+
+| Cost Tier | How Models Are Classified | Agent |
+|-----------|---------------------------|-------|
+| free | Provider is `ollama`, `lmstudio`, or `llama.cpp` | `local-worker` |
+| cheap | Model name matches `haiku`, `gpt-4o-mini`, `gemini.*flash`, `nano`, etc. | `build` |
+| moderate | Model name matches `sonnet`, `gpt-4o`, `codex`, `claude`, `gemini`, etc. | `build` |
+| expensive | Model name matches `opus`, `gpt-5`, `o1-pro`, `gemini.*ultra`, etc. | `build` |
+
+The first model found in each tier becomes the default suggestion. If a tier
+has no models, the router falls back to the nearest available tier.
+
+This means the plugin works with **any combination of providers** -- you don't
+need Anthropic specifically. It will suggest whatever you have configured.
 
 ## File Structure
 
