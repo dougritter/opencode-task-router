@@ -1,5 +1,5 @@
 ---
-description: Lightweight agent using a free local Ollama model for simple tasks
+description: Lightweight agent for simple tasks — switch to this for trivial work
 mode: primary
 model: ollama/qwen3:8b
 temperature: 0.2
