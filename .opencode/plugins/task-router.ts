@@ -12,6 +12,11 @@ import { join } from "path"
  * Does NOT interact with OpenCode's model/provider system to avoid
  * side effects. Recommendations are tier-based -- you pick the
  * specific model yourself via /models.
+ *
+ * Learning loop: message.updated events track which model/agent
+ * was actually used per session. When session.idle fires, the
+ * plugin compares the recommendation to the actual tier and logs
+ * the result.
  */
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -28,12 +33,21 @@ interface HistoryEntry {
   prompt: string
   recommendedTier: string
   accepted?: boolean
+  actualTier?: string
+  actualModel?: string
 }
 
 interface PendingRecommendation {
   ts: string
   prompt: string
   tier: string
+  sessionID: string
+}
+
+interface SessionModelInfo {
+  providerID: string
+  modelID: string
+  agent: string
 }
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -62,6 +76,45 @@ const TIER_INFO: Record<string, { description: string; agent: string }> = {
     description: "Premium paid model (e.g. Opus, GPT-5, o1-pro)",
     agent: "build",
   },
+}
+
+// ── Tier inference from model/provider IDs ───────────────────────────
+
+/**
+ * Infer the cost tier from a provider ID and model ID.
+ * Uses regex heuristics on model names -- does NOT call any
+ * OpenCode SDK methods to avoid side effects.
+ */
+function inferTierFromModel(providerID: string, modelID: string): string {
+  const provider = providerID.toLowerCase()
+  const model = modelID.toLowerCase()
+
+  // Free tier: local model providers
+  if (
+    provider === "ollama" ||
+    provider === "lmstudio" ||
+    provider === "llama.cpp" ||
+    provider === "llamacpp"
+  ) {
+    return "free"
+  }
+
+  // Expensive tier patterns
+  if (/opus|o1-pro|gpt-?5|gemini[.-_]?ultra/.test(model)) {
+    return "expensive"
+  }
+
+  // Cheap tier patterns
+  if (
+    /haiku|gpt-?4o-?mini|gemini[.-_]?flash|nano|mini|small/.test(model) &&
+    !/sonnet/.test(model)
+  ) {
+    return "cheap"
+  }
+
+  // Moderate tier: everything else from paid providers
+  // Matches: sonnet, gpt-4o, codex, claude, gemini-pro, etc.
+  return "moderate"
 }
 
 // ── History helpers ──────────────────────────────────────────────────
@@ -136,11 +189,14 @@ When "accepted" is false, the developer disagreed with the recommendation
 and chose a different tier -- adjust your future classifications accordingly:\n\n`
 
     for (const entry of history) {
-      const status =
-        entry.accepted === false
-          ? `OVERRIDDEN (recommended ${entry.recommendedTier}, developer chose differently)`
-          : `accepted`
-      prompt += `- "${truncate(entry.prompt, 80)}" -> recommended: ${entry.recommendedTier}, ${status}\n`
+      if (entry.accepted === false && entry.actualTier) {
+        prompt += `- "${truncate(entry.prompt, 80)}" -> recommended: ${entry.recommendedTier}, OVERRIDDEN -> developer used: ${entry.actualTier}\n`
+      } else if (entry.accepted === true) {
+        prompt += `- "${truncate(entry.prompt, 80)}" -> recommended: ${entry.recommendedTier}, accepted\n`
+      } else {
+        // Legacy entries without accepted field
+        prompt += `- "${truncate(entry.prompt, 80)}" -> recommended: ${entry.recommendedTier}\n`
+      }
     }
     prompt += "\n"
   }
@@ -229,6 +285,10 @@ export const TaskRouterPlugin: Plugin = async ({
   // can compare it against what the user actually did.
   let pending: PendingRecommendation | null = null
 
+  // Track which model/agent was used per session via message.updated events.
+  // This avoids calling client.config.providers() which has known side effects.
+  const sessionModels = new Map<string, SessionModelInfo>()
+
   return {
     // ── Custom tool: route_task ────────────────────────────────────
     tool: {
@@ -301,13 +361,14 @@ export const TaskRouterPlugin: Plugin = async ({
             ts: new Date().toISOString(),
             prompt: args.prompt,
             tier: classification.costTier,
+            sessionID: context.sessionID,
           }
 
           // 5. Format and return the recommendation
           const historyNote =
             history.length > 0
               ? `*Calibrated from ${history.length} past routing decisions.*`
-              : "*No routing history yet -- recommendations will improve as you use the router.*"
+              : "*No routing history yet — recommendations will improve as you use the router.*"
 
           // Tier overview
           const tierLines: string[] = ["", "**Cost tiers:**", ""]
@@ -344,23 +405,66 @@ export const TaskRouterPlugin: Plugin = async ({
       }),
     },
 
-    // ── Event hook: observe actual usage after routing ─────────────
+    // ── Event hooks: observe actual usage after routing ────────────
     event: async ({ event }) => {
+      // Track model/agent from message events
+      if (event.type === "message.updated") {
+        const msg = (event as any).properties?.info
+        if (!msg) return
+
+        if (msg.role === "user" && msg.sessionID) {
+          // UserMessage carries .agent and .model { providerID, modelID }
+          sessionModels.set(msg.sessionID, {
+            providerID: msg.model?.providerID || "unknown",
+            modelID: msg.model?.modelID || "unknown",
+            agent: msg.agent || "unknown",
+          })
+        } else if (msg.role === "assistant" && msg.sessionID) {
+          // AssistantMessage carries .providerID, .modelID, and .mode (agent)
+          sessionModels.set(msg.sessionID, {
+            providerID: msg.providerID || "unknown",
+            modelID: msg.modelID || "unknown",
+            agent: msg.mode || "unknown",
+          })
+        }
+      }
+
+      // When session goes idle, compare recommendation to what was actually used
       if (event.type === "session.idle" && pending) {
         try {
           const projectRoot = worktree || directory
+          const sessionID = (event as any).properties?.sessionID
+
+          // Look up what model was actually used in this session
+          const actualInfo = sessionID
+            ? sessionModels.get(sessionID)
+            : null
+
+          let accepted: boolean | undefined = undefined
+          let actualTier: string | undefined = undefined
+          let actualModel: string | undefined = undefined
+
+          if (actualInfo && actualInfo.providerID !== "unknown") {
+            actualTier = inferTierFromModel(actualInfo.providerID, actualInfo.modelID)
+            actualModel = `${actualInfo.providerID}/${actualInfo.modelID}`
+            accepted = actualTier === pending.tier
+          }
 
           const entry: HistoryEntry = {
             ts: pending.ts,
             prompt: truncate(pending.prompt, 200),
             recommendedTier: pending.tier,
-            // We can't reliably detect the actual model without
-            // client.config.providers(), so we just log the recommendation.
-            // Future: could use session event properties if available.
-            accepted: undefined,
+            accepted,
+            actualTier,
+            actualModel,
           }
 
           appendHistory(projectRoot, entry)
+
+          // Clean up the session model tracking for this session
+          if (sessionID) {
+            sessionModels.delete(sessionID)
+          }
         } catch {
           // Silently ignore logging errors
         } finally {
