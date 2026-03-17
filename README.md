@@ -144,7 +144,7 @@ This repo includes GitHub Actions for:
 - npm publishing from version tags like `v0.1.0`
 - manual publish dry runs through `workflow_dispatch`
 
-Publishing can be fully automated through GitHub Actions once you add an `NPM_TOKEN` repository secret.
+Publishing can be fully automated through GitHub Actions using npm trusted publishing with GitHub OIDC.
 
 See `RELEASE.md` for the release checklist and tag-based publishing flow.
 
