@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-task-router",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode plugin that recommends the right model cost tier for a development task using a local Ollama classifier.",
   "type": "module",
   "main": "dist/index.js",
