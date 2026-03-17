@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-task-router",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that recommends the right model cost tier for a development task using a local Ollama classifier.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run test:unit && npm run test:smoke",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:unit": "npm run build && node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "ollama",
+    "routing",
+    "agent",
+    "task-router"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dougritter/opencode-task-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dougritter/opencode-task-router/issues"
+  },
+  "homepage": "https://github.com/dougritter/opencode-task-router#readme",
+  "license": "MIT",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.2.27"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.2.27",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

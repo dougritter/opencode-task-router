@@ -1,95 +1,28 @@
-# OpenCode Task Router Plugin
+# OpenCode Task Router
 
-An [OpenCode](https://opencode.ai) plugin that analyzes your development tasks using a **local Ollama model** (zero cost) and recommends the optimal cost tier and agent to use -- routing simple tasks to free local models and complex tasks to paid cloud models.
+An [OpenCode](https://opencode.ai) plugin that classifies a development task with a local Ollama model and recommends the right cost tier and agent to use.
 
-The router learns from your decisions over time by observing which tier you actually use after each recommendation.
+It is designed to keep simple work on free local models and reserve paid models for tasks that actually need them.
 
-## How It Works
+## What You Get
 
-```
-You type: /route "implement user authentication"
-                    |
-                    v
-        +---------------------------+
-        |   Ollama (qwen3:8b)       |
-        |   classifies the task     |
-        |   locally -- zero cost    |
-        +-------------+-------------+
-                      |
-                      v
-        +---------------------------+
-        |   Recommendation:         |
-        |   complexity: complex     |
-        |   tier: expensive         |
-        |   -> use a premium model  |
-        +-------------+-------------+
-                      |
-                      v
-        +---------------------------+
-        |   You switch model/agent  |
-        |   (or ignore the advice)  |
-        |   -- your choice is       |
-        |   logged for future       |
-        |   calibration             |
-        +---------------------------+
-```
-
-### Cost Tiers
-
-| Tier | Description | Suggested Agent |
-|------|-------------|-----------------|
-| **free** | Local model (Ollama) -- zero cost, trivial/simple tasks | `local-worker` |
-| **cheap** | Fast paid model (e.g. Haiku, GPT-4o Mini, Gemini Flash) | `build` |
-| **moderate** | Capable paid model (e.g. Sonnet, GPT-4o, Codex) | `build` |
-| **expensive** | Premium paid model (e.g. Opus, GPT-5, o1-pro) | `build` |
+- A `route_task` tool for task-to-model routing recommendations
+- Cost-tier recommendations: `free`, `cheap`, `moderate`, `expensive`
+- Agent guidance based on the recommended tier
+- Lightweight learning from your past routing decisions
 
 ## Prerequisites
 
-1. **[OpenCode](https://opencode.ai)** installed and configured with at least one provider
-2. **[Ollama](https://ollama.ai)** installed and running locally
-3. **qwen3:8b** model pulled in Ollama
+1. [OpenCode](https://opencode.ai) installed
+2. [Ollama](https://ollama.ai) installed and running
+3. The classifier model pulled locally:
 
 ```bash
-# Install Ollama (macOS)
-brew install ollama
-
-# Start Ollama
 ollama serve
-
-# Pull the classifier model
 ollama pull qwen3:8b
 ```
 
-## Installation
-
-### 1. Copy the plugin files
-
-Clone this repo and copy the `.opencode/` directory and `opencode.json` into your project:
-
-```bash
-git clone git@github.com:dougritter/opencode-task-router.git
-cp -r opencode-task-router/.opencode /path/to/your/project/
-cp opencode-task-router/opencode.json /path/to/your/project/
-```
-
-Your project should now have:
-
-```
-your-project/
-├── opencode.json                 # Ollama provider config
-└── .opencode/
-    ├── package.json              # Plugin dependencies
-    ├── plugins/
-    │   └── task-router.ts        # Core plugin
-    ├── commands/
-    │   └── route.md              # /route slash command
-    └── agents/
-        └── local-worker.md       # Free-tier agent using Ollama
-```
-
-### 2. Add Ollama to your enabled providers
-
-If your global OpenCode config (`~/.config/opencode/opencode.json` or `opencode.jsonc`) uses `enabled_providers`, add `"ollama"` to the list:
+If your global OpenCode config uses `enabled_providers`, include `ollama` there too:
 
 ```jsonc
 {
@@ -97,191 +30,142 @@ If your global OpenCode config (`~/.config/opencode/opencode.json` or `opencode.
 }
 ```
 
-This allows OpenCode to use the Ollama models defined in the project-level `opencode.json`.
+## Install From NPM
 
-### 3. Restart OpenCode
+Add the plugin package to your OpenCode config:
 
-OpenCode automatically installs plugin dependencies and loads plugins from `.opencode/plugins/` on startup.
-
-## Usage
-
-### Using the `/route` command
-
-Type `/route` followed by a description of your task:
-
-```
-/route fix a typo in the README
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-task-router"]
+}
 ```
 
-The router will analyze your task and output a recommendation like:
+Then restart OpenCode. OpenCode installs npm plugins automatically with Bun at startup.
 
-```
-## Task Routing Recommendation
+## Minimal Usage
 
-| Factor        | Assessment  |
-|---------------|-------------|
-| Complexity    | trivial     |
-| Context needs | small       |
-| Cost tier     | free        |
+Ask OpenCode to call the tool directly:
 
-Reasoning: Fixing a typo is a simple text edit requiring minimal context.
-
-Cost tiers:
-
-- free: Local model (Ollama) — zero cost, good for trivial/simple tasks  <-- recommended
-- cheap: Fast paid model (e.g. Haiku, GPT-4o Mini, Gemini Flash)
-- moderate: Capable paid model (e.g. Sonnet, GPT-4o, Codex)
-- expensive: Premium paid model (e.g. Opus, GPT-5, o1-pro)
-
----
-
-### How to proceed
-
-1. Switch agent — press `Tab` and select `local-worker`
-2. Switch model — run `/models` and pick a free-tier model
-3. Ignore — just keep working with your current setup if you disagree
-```
-
-### Acting on the recommendation
-
-After getting a recommendation:
-
-- **Switch agent**: Press `Tab` to cycle between agents. Select `local-worker` for free-tier tasks or stay on `build` for paid tiers.
-- **Switch model**: Run `/models` to open the model picker and select a model matching the recommended tier.
-- **Ignore**: Just continue with your current setup if you disagree with the recommendation.
-
-Your choice is observed and logged to improve future recommendations.
-
-### Using the tool directly
-
-You can also ask the agent to call the tool without the slash command:
-
-```
+```text
 Use the route_task tool to analyze this task: refactor the authentication module
 ```
 
-## How Learning Works
+Typical output:
 
-The plugin uses **implicit observation** to learn from your routing decisions:
+```text
+## Task Routing Recommendation
 
-1. When you run `/route`, the recommendation is stored in memory
-2. When the session goes idle, the plugin logs the recommendation to `.opencode/router-history.jsonl`
-3. On future `/route` calls, the last 20 history entries are injected as few-shot examples into the classifier prompt
-4. Over time, the classifier adapts to your preferences
+| Factor | Assessment |
+|--------|-----------|
+| Complexity | **moderate** |
+| Context needs | **medium** |
+| Cost tier | **moderate** |
 
-The history file is append-only JSONL. Each entry looks like:
-
-```json
-{"ts":"2026-03-16T10:30:00.000Z","prompt":"fix a typo in readme","recommendedTier":"free"}
+**Reasoning:** Multi-file refactoring usually needs broader codebase context.
 ```
+
+## Optional Full Setup
+
+The npm package guarantees the `route_task` tool.
+
+If you also want the `/route` shortcut, a local free-tier agent, and an example Ollama provider config, copy the example files from `examples/opencode/` into your project:
+
+```text
+examples/opencode/
+├── opencode.json
+└── .opencode/
+    ├── agents/
+    │   └── local-worker.md
+    └── commands/
+        └── route.md
+```
+
+Suggested mapping:
+
+- `examples/opencode/.opencode/commands/route.md` -> `.opencode/commands/route.md`
+- `examples/opencode/.opencode/agents/local-worker.md` -> `.opencode/agents/local-worker.md`
+- `examples/opencode/opencode.json` -> merge into your project `opencode.json`
+
+## How It Works
+
+1. `route_task` sends your task description to a local Ollama classifier
+2. The classifier returns task complexity, context estimate, and cost tier
+3. The plugin recommends an agent and model tier
+4. When the session goes idle, the plugin logs what was recommended to `.opencode/router-history.jsonl`
+5. Recent history is reused as calibration on future routing decisions
 
 ## Configuration
 
-### Changing the classifier model
+The plugin currently defaults to:
 
-Edit the constants at the top of `.opencode/plugins/task-router.ts`:
-
-```typescript
+```ts
 const OLLAMA_BASE_URL = "http://localhost:11434"
 const CLASSIFIER_MODEL = "qwen3:8b"
 const MAX_HISTORY_EXAMPLES = 20
 ```
 
-Alternative classifier models:
-- `llama3.2:3b` -- faster, less reliable JSON output
-- `qwen3:14b` -- better classification quality, more VRAM needed
+These live in `src/index.ts`.
 
-### Customizing the local-worker agent
+## Local Development
 
-Edit `.opencode/agents/local-worker.md` to change the system prompt, model, or temperature:
+Install dependencies and build the package:
 
-```markdown
----
-description: Lightweight agent for simple tasks
-mode: primary
-model: ollama/qwen3:8b
-temperature: 0.2
----
-
-Your custom system prompt here...
+```bash
+npm install
+npm run build
+npm test
 ```
 
-### Adding more Ollama models
+For local OpenCode development in this repo, the project plugin entrypoint at `.opencode/plugins/task-router.ts` re-exports the package source from `src/index.ts`.
 
-Add models to `opencode.json` under the `ollama` provider:
+The smoke test automates what is practical without depending on a real OpenCode session:
 
-```json
-{
-  "provider": {
-    "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Ollama (local)",
-      "options": {
-        "baseURL": "http://localhost:11434/v1"
-      },
-      "models": {
-        "qwen3:8b": {
-          "name": "Qwen3 8B (local/free)",
-          "limit": { "context": 32768, "output": 8192 }
-        },
-        "llama3.2:3b": {
-          "name": "Llama 3.2 3B (local/free)",
-          "limit": { "context": 8192, "output": 4096 }
-        }
-      }
-    }
-  }
-}
-```
+- builds the package
+- creates a tarball
+- installs the tarball into a temporary directory
+- imports the installed package
+- executes `route_task` with a mocked Ollama response
+- verifies the history file is written
 
-## File Structure
+The unit tests cover the internal routing logic directly:
 
-```
-.opencode/
-  plugins/
-    task-router.ts          # Core plugin: route_task tool + event hooks + history
-  commands/
-    route.md                # /route slash command
-  agents/
-    local-worker.md         # Primary agent using Ollama for free-tier tasks
-  package.json              # Plugin dependency (@opencode-ai/plugin)
-  router-history.jsonl      # Auto-generated at runtime (gitignored)
-opencode.json               # Ollama provider configuration
-```
+- cost-tier inference from provider/model ids
+- classifier response parsing and normalization
+- prompt construction with calibration history
+- history file read/write helpers
+- plugin recommendation, retry, and idle logging behavior
+
+## CI And Publishing
+
+This repo includes GitHub Actions for:
+
+- CI on pushes to `main` and pull requests
+- npm publishing from version tags like `v0.1.0`
+- manual publish dry runs through `workflow_dispatch`
+
+Publishing can be fully automated through GitHub Actions once you add an `NPM_TOKEN` repository secret.
+
+See `RELEASE.md` for the release checklist and tag-based publishing flow.
 
 ## Troubleshooting
 
-### "Cannot connect to Ollama"
+### Cannot connect to Ollama
 
-Make sure Ollama is running:
+Make sure Ollama is running and the model is installed:
 
 ```bash
 ollama serve
-```
-
-And that the classifier model is pulled:
-
-```bash
 ollama pull qwen3:8b
 ```
 
-### "The requested model is not supported"
+### Plugin loads but routing falls back to moderate
 
-This usually means `ollama` is not in your `enabled_providers`. Add it to your global OpenCode config:
+That usually means the classifier returned invalid output. The plugin retries once, then falls back to a safe default.
 
-```jsonc
-// ~/.config/opencode/opencode.jsonc
-{
-  "enabled_providers": ["your-provider", "ollama"]
-}
-```
+### No history file created yet
 
-### Classification returns wrong results
-
-The classifier improves over time as it learns from your decisions. You can also:
-
-- Switch to a larger classifier model (`qwen3:14b`)
-- Clear the history file to reset learning: `rm .opencode/router-history.jsonl`
+The history file is only written after a routing recommendation and when the session goes idle.
 
 ## License
 

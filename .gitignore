@@ -1,8 +1,12 @@
 # Dependencies
 node_modules/
+dist/
 
 # OpenCode runtime files
 .opencode/router-history.jsonl
+
+# Build metadata
+*.tsbuildinfo
 
 # OS files
 .DS_Store
